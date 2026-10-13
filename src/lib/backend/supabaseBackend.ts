@@ -9,13 +9,11 @@ import { visFloorOf } from '../visFloor';
 
 const BUCKET = 'ohome';
 const PROBE = ['profiles', 'site_settings', 'posts', 'characters'];
-
 export async function createSupabaseBackend(
   cfg: Extract<BackendConfig, { kind: 'supabase' }>,
 ): Promise<Backend> {
   const { createBrowserClient } = await import('@supabase/ssr');
   const sb: SupabaseClient = createBrowserClient(cfg.url.replace(/\/$/, ''), cfg.anonKey);
-
   const toUser = async (u: { id: string; email?: string; user_metadata?: Record<string, unknown> } | null | undefined): Promise<BackendUser | null> => {
     if (!u) return null;
     const { data: prof } = await sb.from('profiles')
@@ -29,10 +27,8 @@ export async function createSupabaseBackend(
       avatarColor: prof?.avatar_color ?? undefined,
     };
   };
-
   return {
     kind: 'supabase',
-
     async check(): Promise<BackendCheck> {
       const fail = (p: Partial<BackendCheck>): BackendCheck =>
         ({ ok: false, reachable: false, schema: false, hasAdmin: false, message: '', ...p });
@@ -50,7 +46,6 @@ export async function createSupabaseBackend(
       } catch {
         return fail({ message: '프로젝트에 접속할 수 없습니다 — URL을 확인해 주세요.' });
       }
-
       const missing: string[] = [];
       for (const t of PROBE) {
         const { error } = await sb.from(t).select('*', { head: true, count: 'exact' }).limit(1);
@@ -59,7 +54,6 @@ export async function createSupabaseBackend(
       if (missing.length) {
         return fail({ reachable, message: `스키마가 아직 없습니다 (${missing.join(', ')}) — 아래 SQL을 Supabase의 SQL Editor에서 한 번 실행해 주세요.` });
       }
-
       const { count } = await sb.from('profiles').select('id', { head: true, count: 'exact' }).eq('role', 'admin');
       const hasAdmin = (count ?? 0) > 0;
       return {
@@ -73,7 +67,6 @@ export async function createSupabaseBackend(
       const { data } = await sb.auth.getUser();
       return toUser(data.user);
     },
-
     onAuthChange(cb) {
       const { data: sub } = sb.auth.onAuthStateChange((_e, session) => {
         void toUser(session?.user).then(cb);
@@ -85,7 +78,6 @@ export async function createSupabaseBackend(
       const { error } = await sb.auth.signInWithPassword({ email: id, password });
       return error ? { ok: false, error: error.message } : { ok: true };
     },
-
     async signUp(id, password, nickname) {
       const { error } = await sb.auth.signUp({ email: id, password, options: { data: { nickname } } });
       return error ? { ok: false, error: error.message } : { ok: true };
@@ -97,21 +89,19 @@ export async function createSupabaseBackend(
       const { error } = await sb.auth.resetPasswordForEmail(email);
       return error ? { ok: false, error: error.message } : { ok: true };
     },
-
     async updateProfile(patch) {
       const { data } = await sb.auth.getUser();
       if (!data.user) return { ok: false, error: '로그인이 필요합니다.' };
-      const row: Record<string, unknown> = { id: data.user.id };
+      const row: Record<string, unknown> = {};
       if (patch.nickname !== undefined) row.nickname = patch.nickname;
       if (patch.avatarUrl !== undefined) row.avatar_url = patch.avatarUrl;
       if (patch.avatarColor !== undefined) row.avatar_color = patch.avatarColor;
-      const { error } = await sb.from('profiles').upsert(row, { onConflict: 'id' });
+      if (Object.keys(row).length === 0) return { ok: true };
+      const { error } = await sb.from('profiles').update(row).eq('id', data.user.id);
       return error ? { ok: false, error: error.message } : { ok: true };
     },
-
     // Supabase는 스키마의 트리거가 첫 가입자를 관리자로 만들어 준다 — 추가 작업 없음
     async claimOwner() { return { ok: true }; },
-
     async listMembers() {
       // avatar_url도 함께 — 이미지 정리가 프로필 사진을 「안 쓰는 파일」로 지우지 않게 (v2.0 사용자 제보)
       const { data, error } = await sb.from('profiles').select('id, nickname, role, avatar_url').order('created_at');
@@ -124,7 +114,6 @@ export async function createSupabaseBackend(
         };
       });
     },
-
     async fetchList<T extends ListItem>(coll: string): Promise<T[]> {
       const { data, error } = await sb.from(coll).select('id, data, sort').order('sort', { ascending: true });
       if (error) throw error;
@@ -133,7 +122,6 @@ export async function createSupabaseBackend(
         return { ...(row.data ?? {}), id: row.id } as T;
       });
     },
-
     async syncList<T extends ListItem>(coll: string, prev: T[], next: T[], uid: string | null) {
       const { inserts, updates, moves, deletes } = diffList(prev, next);
       const toRow = ({ item, sort }: { item: T; sort: number }) => {
@@ -175,7 +163,6 @@ export async function createSupabaseBackend(
         if (error) throw error;
       }
     },
-
     /* 공개범위·편집 권한 목록만 다시 계산해 덮어쓰기 (v2.0) — 같은 값이 될 것들끼리 묶어
        한 번에 UPDATE 한다. data를 다시 쓰지 않으므로 내용·순서가 흔들리지 않는다.
        editor_ids도 함께 쓴다 (포크 제보 — 업데이트 전에 준 편집 권한이 행에 평평한 목록으로
@@ -201,7 +188,6 @@ export async function createSupabaseBackend(
       }
       return n;
     },
-
     subscribe(coll, onChange) {
       const ch = sb.channel(`ohome:${coll}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: coll }, () => onChange())
@@ -214,13 +200,11 @@ export async function createSupabaseBackend(
       if (error) throw error;
       return (data?.value ?? null) as T | null;
     },
-
     async saveSetting(key, value) {
       const { error } = await sb.from('site_settings')
         .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
       if (error) throw error;
     },
-
     async fetchAllSettings() {
       const { data, error } = await sb.from('site_settings').select('key, value');
       if (error) throw error;
@@ -228,7 +212,6 @@ export async function createSupabaseBackend(
       (data ?? []).forEach(r => { out[(r as { key: string }).key] = (r as { value: unknown }).value; });
       return out;
     },
-
     async uploadFile(blob, ext) {
       const path = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}.${ext}`;
       const { error } = await sb.storage.from(BUCKET)
@@ -241,7 +224,6 @@ export async function createSupabaseBackend(
       if (error) throw error;
       return sb.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
     },
-
     async listFiles() {
       const out: { ref: string; size: number }[] = [];
       const PAGE = 100;
@@ -257,7 +239,6 @@ export async function createSupabaseBackend(
       }
       return out;
     },
-
     async deleteFile(ref) {
       // 저장한 값은 공개 URL — 버킷 안 파일명만 떼어 지운다
       const name = decodeURIComponent(ref.split('?')[0].split('/').pop() ?? '');
